@@ -34,7 +34,7 @@ export class GeminiLiveBridge {
             },
           ],
         },
-        responseModalities: ['AUDIO', 'TEXT'],
+        responseModalities: ['AUDIO'],
         speechConfig: {
           languageCode: DEFAULT_LANGUAGE,
           voiceConfig: {
@@ -83,6 +83,14 @@ export class GeminiLiveBridge {
       });
     }
 
+    if (serverContent.outputTranscription?.text) {
+      this.handlers.onText?.({
+        role: 'model',
+        text: serverContent.outputTranscription.text,
+        mode: 'replace',
+      });
+    }
+
     if (serverContent.modelTurn?.parts?.length) {
       for (const part of serverContent.modelTurn.parts) {
         if (part.thought || part.inlineData?.mimeType?.includes('thought')) {
@@ -94,10 +102,6 @@ export class GeminiLiveBridge {
             mimeType: part.inlineData.mimeType,
             data: part.inlineData.data,
           });
-        }
-
-        if (part.text?.trim()) {
-          this.handlers.onText?.({ role: 'model', text: part.text, mode: 'append' });
         }
       }
     }
