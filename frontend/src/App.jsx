@@ -227,11 +227,11 @@ function App() {
   return (
     <main className="app-shell">
       <section className="card">
-        <p className="eyebrow">Gemini 2.0 Flash Audio Dialog</p>
+        <p className="eyebrow">Gemini 2.5 Flash Native Audio</p>
         <h1>Realtime Voice Console</h1>
         <p className="lede">
-          Mikrofon browser dialirkan langsung ke Gemini Live API,
-          dan diputar kembali sebagai audio latensi rendah di browser.
+          Mikrofon browser dialirkan langsung ke Gemini Live API native audio,
+          dengan respons suara dan transkrip Bahasa Indonesia berlatensi rendah di browser.
         </p>
 
         <div className="status-row">
