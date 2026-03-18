@@ -24,6 +24,7 @@ function App() {
   const isStoppingRef = useRef(false);
   const connectionStateRef = useRef('idle');
   const conversationStateRef = useRef('disconnected');
+  const activeTranscriptIdsRef = useRef({ user: null, model: null });
 
   const updateConnectionState = (nextState) => {
     connectionStateRef.current = nextState;
@@ -45,24 +46,38 @@ function App() {
 
   useEffect(() => () => {
     stopSession();
+    // stopSession intentionally uses refs so cleanup should stay mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const appendTranscript = (role, text) => {
-    if (!text?.trim()) return;
+  const appendTranscript = ({ role, text, mode = 'append' }) => {
+    const normalizedText = text?.trim();
+    if (!normalizedText) return;
 
     setTranscripts((current) => {
       const next = [...current];
-      const last = next[next.length - 1];
+      const activeIds = activeTranscriptIdsRef.current;
+      const activeId = activeIds[role];
+      const otherRole = role === 'user' ? 'model' : 'user';
 
-      if (last && last.role === role) {
-        next[next.length - 1] = {
-          ...last,
-          text: mergeTranscriptText(last.text, text),
-        };
-        return next;
+      if (activeIds[otherRole]) {
+        activeIds[otherRole] = null;
       }
 
-      next.push({ id: crypto.randomUUID(), role, text: text.trim() });
+      if (activeId) {
+        const index = next.findIndex((item) => item.id === activeId);
+        if (index >= 0) {
+          next[index] = {
+            ...next[index],
+            text: mode === 'replace' ? normalizedText : mergeTranscriptText(next[index].text, normalizedText),
+          };
+          return next;
+        }
+      }
+
+      const id = crypto.randomUUID();
+      activeIds[role] = id;
+      next.push({ id, role, text: normalizedText });
       return next;
     });
   };
@@ -131,6 +146,7 @@ function App() {
     }
 
     pcmQueueRef.current = [];
+    activeTranscriptIdsRef.current = { user: null, model: null };
     updateConnectionState('idle');
     updateConversationState('disconnected');
     if (!preserveError) {
@@ -223,13 +239,15 @@ function App() {
         await playerRef.current.enqueueBase64(payload.data);
       },
       onText: (payload) => {
-        appendTranscript(payload.role, payload.text);
+        appendTranscript(payload);
       },
       onInterrupted: () => {
         playerRef.current.clear();
         updateConversationState('listening');
       },
       onTurnComplete: (payload) => {
+        activeTranscriptIdsRef.current.model = null;
+        activeTranscriptIdsRef.current.user = null;
         updateConversationState('listening');
         if (payload.closed && !isStoppingRef.current) {
           stopSession();

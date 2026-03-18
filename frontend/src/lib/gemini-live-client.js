@@ -34,7 +34,7 @@ export class GeminiLiveBridge {
             },
           ],
         },
-        responseModalities: ['AUDIO'],
+        responseModalities: ['AUDIO', 'TEXT'],
         speechConfig: {
           languageCode: DEFAULT_LANGUAGE,
           voiceConfig: {
@@ -76,11 +76,11 @@ export class GeminiLiveBridge {
     }
 
     if (serverContent.inputTranscription?.text) {
-      this.handlers.onText?.({ role: 'user', text: serverContent.inputTranscription.text });
-    }
-
-    if (serverContent.outputTranscription?.text) {
-      this.handlers.onText?.({ role: 'model', text: serverContent.outputTranscription.text });
+      this.handlers.onText?.({
+        role: 'user',
+        text: serverContent.inputTranscription.text,
+        mode: 'replace',
+      });
     }
 
     if (serverContent.modelTurn?.parts?.length) {
@@ -97,7 +97,7 @@ export class GeminiLiveBridge {
         }
 
         if (part.text?.trim()) {
-          this.handlers.onText?.({ role: 'model', text: part.text });
+          this.handlers.onText?.({ role: 'model', text: part.text, mode: 'append' });
         }
       }
     }
