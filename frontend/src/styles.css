@@ -138,3 +138,27 @@ h1 {
   margin: 8px 0 0;
   color: #cbd5e1;
 }
+
+.info-grid {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.info-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.info-card strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.info-card p {
+  margin: 0;
+  color: #cbd5e1;
+}

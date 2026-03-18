@@ -5,6 +5,12 @@ const DEFAULT_MODEL =
 const DEFAULT_VOICE = import.meta.env.VITE_GEMINI_VOICE || 'Aoede';
 const DEFAULT_LANGUAGE = 'id-ID';
 
+const INDONESIAN_SYSTEM_PROMPT = `Anda adalah asisten suara AI untuk penutur Bahasa Indonesia.
+Jawab selalu dalam Bahasa Indonesia yang alami, hangat, jelas, dan tidak kaku.
+Utamakan pilihan kata yang umum dipakai di Indonesia.
+Bila pengguna mencampur bahasa, tetap balas dalam Bahasa Indonesia kecuali pengguna meminta bahasa lain.
+Saat menjelaskan langkah teknis, buat ringkas, runtut, dan mudah diikuti.`;
+
 export class GeminiLiveBridge {
   constructor({ apiKey, onAudio, onText, onInterrupted, onTurnComplete, onError }) {
     this.ai = new GoogleGenAI({
@@ -24,8 +30,7 @@ export class GeminiLiveBridge {
         systemInstruction: {
           parts: [
             {
-              text:
-                'Anda adalah asisten AI yang ramah dan membantu. Selalu dengarkan dan jawab dalam Bahasa Indonesia yang alami, jelas, dan sopan. Jika pengguna bercampur bahasa, tetap utamakan Bahasa Indonesia kecuali diminta lain.',
+              text: INDONESIAN_SYSTEM_PROMPT,
             },
           ],
         },
@@ -41,7 +46,9 @@ export class GeminiLiveBridge {
         inputAudioTranscription: {
           languageCode: DEFAULT_LANGUAGE,
         },
-        outputAudioTranscription: {},
+        outputAudioTranscription: {
+          languageCode: DEFAULT_LANGUAGE,
+        },
         enableAffectiveDialog: true,
         realtimeInputConfig: {
           automaticActivityDetection: {
@@ -58,39 +65,41 @@ export class GeminiLiveBridge {
   }
 
   handleMessage(message) {
-    if (message.serverContent) {
-      const { serverContent } = message;
+    if (!message.serverContent) {
+      return;
+    }
 
-      if (serverContent.interrupted) {
-        this.handlers.onInterrupted?.();
-      }
+    const { serverContent } = message;
 
-      if (serverContent.inputTranscription?.text) {
-        this.handlers.onText?.({ role: 'user', text: serverContent.inputTranscription.text });
-      }
+    if (serverContent.interrupted) {
+      this.handlers.onInterrupted?.();
+    }
 
-      if (serverContent.outputTranscription?.text) {
-        this.handlers.onText?.({ role: 'model', text: serverContent.outputTranscription.text });
-      }
+    if (serverContent.inputTranscription?.text) {
+      this.handlers.onText?.({ role: 'user', text: serverContent.inputTranscription.text });
+    }
 
-      if (serverContent.modelTurn?.parts?.length) {
-        for (const part of serverContent.modelTurn.parts) {
-          if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
-            this.handlers.onAudio?.({
-              mimeType: part.inlineData.mimeType,
-              data: part.inlineData.data,
-            });
-          }
+    if (serverContent.outputTranscription?.text) {
+      this.handlers.onText?.({ role: 'model', text: serverContent.outputTranscription.text });
+    }
 
-          if (part.text) {
-            this.handlers.onText?.({ role: 'model', text: part.text });
-          }
+    if (serverContent.modelTurn?.parts?.length) {
+      for (const part of serverContent.modelTurn.parts) {
+        if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
+          this.handlers.onAudio?.({
+            mimeType: part.inlineData.mimeType,
+            data: part.inlineData.data,
+          });
+        }
+
+        if (part.text) {
+          this.handlers.onText?.({ role: 'model', text: part.text });
         }
       }
+    }
 
-      if (serverContent.turnComplete) {
-        this.handlers.onTurnComplete?.({ closed: false });
-      }
+    if (serverContent.turnComplete) {
+      this.handlers.onTurnComplete?.({ closed: false });
     }
   }
 
