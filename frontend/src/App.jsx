@@ -11,6 +11,7 @@ function App() {
   const [conversationState, setConversationState] = useState('disconnected');
   const [error, setError] = useState('');
   const [transcripts, setTranscripts] = useState([]);
+
   const mediaStreamRef = useRef(null);
   const captureContextRef = useRef(null);
   const sourceNodeRef = useRef(null);
@@ -19,15 +20,14 @@ function App() {
   const flushTimerRef = useRef(null);
   const pcmQueueRef = useRef([]);
   const playerRef = useRef(new StreamingAudioPlayer(24000));
-  const reconnectTimerRef = useRef(null);
-  const manualStopRef = useRef(false);
+  const isInitializingRef = useRef(false);
 
   const statusLabel = useMemo(() => {
     if (error) return 'Error';
-    if (conversationState === 'speaking') return 'Speaking';
-    if (connectionState === 'streaming') return 'Listening';
-    if (connectionState === 'connecting') return 'Connecting';
-    return 'Disconnected';
+    if (conversationState === 'speaking') return 'Berbicara';
+    if (connectionState === 'streaming') return 'Mendengarkan';
+    if (connectionState === 'connecting') return 'Menghubungkan';
+    return 'Terputus';
   }, [connectionState, conversationState, error]);
 
   useEffect(() => () => stopSession(), []);
@@ -57,48 +57,65 @@ function App() {
 
     const merged = mergeFloat32(pcmQueueRef.current);
     pcmQueueRef.current = [];
-    const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
-    const pcm16 = floatTo16BitPCM(downsampled);
-    gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
+    if (captureContextRef.current && captureContextRef.current.state !== 'closed') {
+        const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
+        const pcm16 = floatTo16BitPCM(downsampled);
+        gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
+    }
   };
 
   const startCapture = async () => {
-    mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        noiseSuppression: true,
-        echoCancellation: true,
-        autoGainControl: true,
-      },
-    });
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            noiseSuppression: true,
+            echoCancellation: true,
+            autoGainControl: true,
+          },
+        });
 
-    const captureContext = new AudioContext();
-    captureContextRef.current = captureContext;
-    await captureContext.audioWorklet.addModule('/pcm-recorder-worklet.js');
+        // Final safety check before proceeding
+        if (connectionState === 'idle' || !isInitializingRef.current) {
+            stream.getTracks().forEach(t => t.stop());
+            return;
+        }
 
-    const sourceNode = captureContext.createMediaStreamSource(mediaStreamRef.current);
-    sourceNodeRef.current = sourceNode;
+        mediaStreamRef.current = stream;
 
-    const workletNode = new AudioWorkletNode(captureContext, 'pcm-recorder-processor');
-    const silentGain = captureContext.createGain();
-    silentGain.gain.value = 0;
-    workletNode.port.onmessage = (event) => {
-      pcmQueueRef.current.push(new Float32Array(event.data));
-    };
+        const captureContext = new AudioContext();
+        captureContextRef.current = captureContext;
 
-    sourceNode.connect(workletNode);
-    workletNode.connect(silentGain).connect(captureContext.destination);
-    workletNodeRef.current = workletNode;
-    flushTimerRef.current = window.setInterval(flushPcm, CHUNK_MS);
+        await captureContext.audioWorklet.addModule('/pcm-recorder-worklet.js');
+
+        if (captureContext.state === 'closed') {
+            throw new Error('AudioContext was closed during initialization.');
+        }
+
+        const sourceNode = captureContext.createMediaStreamSource(stream);
+        sourceNodeRef.current = sourceNode;
+
+        const workletNode = new AudioWorkletNode(captureContext, 'pcm-recorder-processor');
+        const silentGain = captureContext.createGain();
+        silentGain.gain.value = 0;
+        workletNode.port.onmessage = (event) => {
+          pcmQueueRef.current.push(new Float32Array(event.data));
+        };
+
+        sourceNode.connect(workletNode);
+        workletNode.connect(silentGain).connect(captureContext.destination);
+        workletNodeRef.current = workletNode;
+
+        if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+        flushTimerRef.current = window.setInterval(flushPcm, CHUNK_MS);
+    } catch (err) {
+        console.error('startCapture failed:', err);
+        throw err;
+    }
   };
 
   const stopSession = async () => {
-    manualStopRef.current = true;
-
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
+    isInitializingRef.current = false;
 
     if (flushTimerRef.current) {
       window.clearInterval(flushTimerRef.current);
@@ -116,12 +133,22 @@ function App() {
     sourceNodeRef.current = null;
 
     if (captureContextRef.current) {
-      await captureContextRef.current.close();
+      const ctx = captureContextRef.current;
       captureContextRef.current = null;
+      if (ctx.state !== 'closed') {
+        try {
+            await ctx.close();
+        } catch (e) {
+            console.warn('Failed to close AudioContext:', e);
+        }
+      }
     }
 
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
+    if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+    }
+
     pcmQueueRef.current = [];
     setConnectionState('idle');
     setConversationState('disconnected');
@@ -130,7 +157,7 @@ function App() {
   const connectGemini = async () => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('VITE_GEMINI_API_KEY is not configured in environment variables.');
+      throw new Error('VITE_GEMINI_API_KEY belum dikonfigurasi.');
     }
 
     setError('');
@@ -152,12 +179,12 @@ function App() {
       },
       onTurnComplete: (payload) => {
         setConversationState('listening');
-        if (payload.closed && !manualStopRef.current) {
+        if (payload.closed) {
            stopSession();
         }
       },
       onError: (error) => {
-        setError(error.message || 'Gemini Live session error.');
+        setError(error.message || 'Kesalahan sesi Gemini Live.');
         stopSession();
       },
     });
@@ -168,34 +195,53 @@ function App() {
     setConversationState('listening');
   };
 
-  const startSession = async (isReconnect = false) => {
-    manualStopRef.current = false;
+  const startSession = async () => {
+    if (isInitializingRef.current || connectionState !== 'idle') return;
+
+    isInitializingRef.current = true;
+    setError('');
+
     try {
       await connectGemini();
       await startCapture();
-      if (isReconnect) {
-        setError('');
-      }
     } catch (sessionError) {
-      setError(sessionError.message);
-      await stopSession();
+      if (isInitializingRef.current) {
+          setError('Gagal memulai sesi: ' + sessionError.message);
+          await stopSession();
+      }
+    } finally {
+      isInitializingRef.current = false;
     }
   };
+
+  const handleAction = () => {
+      if (connectionState === 'streaming') {
+          stopSession();
+      } else if (connectionState === 'idle') {
+          startSession();
+      }
+  };
+
+  const isPending = connectionState === 'connecting' || isInitializingRef.current;
 
   return (
     <main className="app-shell">
       <section className="card">
-        <p className="eyebrow">Gemini 2.5 Flash Native Audio Dialog</p>
+        <p className="eyebrow">Gemini 2.0 Flash Audio Dialog</p>
         <h1>Realtime Voice Console</h1>
         <p className="lede">
-          Browser microphone PCM is streamed directly to Gemini Live API,
-          and played back as low-latency audio in the browser.
+          Mikrofon browser dialirkan langsung ke Gemini Live API,
+          dan diputar kembali sebagai audio latensi rendah di browser.
         </p>
 
         <div className="status-row">
-          <span className={`status-pill ${statusLabel.toLowerCase()}`}>{statusLabel}</span>
-          <button className="primary-button" onClick={connectionState === 'streaming' ? stopSession : startSession}>
-            {connectionState === 'streaming' ? 'Stop session' : 'Start session'}
+          <span className={`status-pill ${statusLabel === 'Berbicara' ? 'speaking' : statusLabel === 'Mendengarkan' ? 'streaming' : statusLabel === 'Menghubungkan' ? 'connecting' : 'idle'}`}>{statusLabel}</span>
+          <button
+            className="primary-button"
+            onClick={handleAction}
+            disabled={isPending}
+          >
+            {connectionState === 'streaming' ? 'Berhenti' : 'Mulai Sesi'}
           </button>
         </div>
 
@@ -203,16 +249,16 @@ function App() {
 
         <div className="transcript-panel">
           <div className="panel-header">
-            <h2>Live transcript</h2>
-            <span>{transcripts.length} messages</span>
+            <h2>Transkrip Langsung</h2>
+            <span>{transcripts.length} pesan</span>
           </div>
           <div className="transcript-list">
             {transcripts.length === 0 ? (
-              <p className="placeholder">Start a session and speak to see user + model transcripts.</p>
+              <p className="placeholder">Mulai sesi dan bicaralah untuk melihat transkrip.</p>
             ) : (
               transcripts.map((item) => (
                 <article key={item.id} className={`transcript-item ${item.role}`}>
-                  <strong>{item.role === 'user' ? 'You' : 'Gemini'}</strong>
+                  <strong>{item.role === 'user' ? 'Anda' : 'Gemini'}</strong>
                   <p>{item.text}</p>
                 </article>
               ))
