@@ -11,6 +11,7 @@ function App() {
   const [conversationState, setConversationState] = useState('disconnected');
   const [error, setError] = useState('');
   const [transcripts, setTranscripts] = useState([]);
+
   const mediaStreamRef = useRef(null);
   const captureContextRef = useRef(null);
   const sourceNodeRef = useRef(null);
@@ -19,7 +20,7 @@ function App() {
   const flushTimerRef = useRef(null);
   const pcmQueueRef = useRef([]);
   const playerRef = useRef(new StreamingAudioPlayer(24000));
-  const manualStopRef = useRef(false);
+  const isInitializingRef = useRef(false);
 
   const statusLabel = useMemo(() => {
     if (error) return 'Error';
@@ -56,7 +57,7 @@ function App() {
 
     const merged = mergeFloat32(pcmQueueRef.current);
     pcmQueueRef.current = [];
-    if (captureContextRef.current) {
+    if (captureContextRef.current && captureContextRef.current.state !== 'closed') {
         const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
         const pcm16 = floatTo16BitPCM(downsampled);
         gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
@@ -73,15 +74,23 @@ function App() {
             autoGainControl: true,
           },
         });
-        mediaStreamRef.current = stream;
 
-        if (!(stream instanceof MediaStream)) {
-            throw new Error('Gagal mendapatkan stream audio mikrofon.');
+        // Final safety check before proceeding
+        if (connectionState === 'idle' || !isInitializingRef.current) {
+            stream.getTracks().forEach(t => t.stop());
+            return;
         }
+
+        mediaStreamRef.current = stream;
 
         const captureContext = new AudioContext();
         captureContextRef.current = captureContext;
+
         await captureContext.audioWorklet.addModule('/pcm-recorder-worklet.js');
+
+        if (captureContext.state === 'closed') {
+            throw new Error('AudioContext was closed during initialization.');
+        }
 
         const sourceNode = captureContext.createMediaStreamSource(stream);
         sourceNodeRef.current = sourceNode;
@@ -101,12 +110,12 @@ function App() {
         flushTimerRef.current = window.setInterval(flushPcm, CHUNK_MS);
     } catch (err) {
         console.error('startCapture failed:', err);
-        throw new Error('Gagal mengakses mikrofon: ' + err.message);
+        throw err;
     }
   };
 
   const stopSession = async () => {
-    manualStopRef.current = true;
+    isInitializingRef.current = false;
 
     if (flushTimerRef.current) {
       window.clearInterval(flushTimerRef.current);
@@ -124,10 +133,15 @@ function App() {
     sourceNodeRef.current = null;
 
     if (captureContextRef.current) {
-      if (captureContextRef.current.state !== 'closed') {
-        await captureContextRef.current.close();
-      }
+      const ctx = captureContextRef.current;
       captureContextRef.current = null;
+      if (ctx.state !== 'closed') {
+        try {
+            await ctx.close();
+        } catch (e) {
+            console.warn('Failed to close AudioContext:', e);
+        }
+      }
     }
 
     if (mediaStreamRef.current) {
@@ -165,7 +179,7 @@ function App() {
       },
       onTurnComplete: (payload) => {
         setConversationState('listening');
-        if (payload.closed && !manualStopRef.current) {
+        if (payload.closed) {
            stopSession();
         }
       },
@@ -182,27 +196,33 @@ function App() {
   };
 
   const startSession = async () => {
-    if (connectionState !== 'idle' && connectionState !== 'error') return;
+    if (isInitializingRef.current || connectionState !== 'idle') return;
 
-    manualStopRef.current = false;
+    isInitializingRef.current = true;
+    setError('');
+
     try {
       await connectGemini();
       await startCapture();
     } catch (sessionError) {
-      setError(sessionError.message);
-      await stopSession();
+      if (isInitializingRef.current) {
+          setError('Gagal memulai sesi: ' + sessionError.message);
+          await stopSession();
+      }
+    } finally {
+      isInitializingRef.current = false;
     }
   };
 
   const handleAction = () => {
       if (connectionState === 'streaming') {
           stopSession();
-      } else if (connectionState === 'idle' || error) {
+      } else if (connectionState === 'idle') {
           startSession();
       }
   };
 
-  const isPending = connectionState === 'connecting';
+  const isPending = connectionState === 'connecting' || isInitializingRef.current;
 
   return (
     <main className="app-shell">
