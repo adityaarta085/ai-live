@@ -1,5 +1,5 @@
 {
-  "buildCommand": "./vercel_build.sh",
+  "buildCommand": "sh vercel_build.sh",
   "outputDirectory": "dist",
   "framework": "vite"
 }
