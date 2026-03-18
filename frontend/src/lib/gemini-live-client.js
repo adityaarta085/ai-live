@@ -12,13 +12,13 @@ export class GeminiLiveBridge {
 
   async connect() {
     this.session = await this.ai.live.connect({
-      model: process.env.GEMINI_LIVE_MODEL || DEFAULT_MODEL,
+      model: DEFAULT_MODEL,
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: process.env.GEMINI_VOICE || DEFAULT_VOICE,
+              voiceName: DEFAULT_VOICE,
             },
           },
         },
