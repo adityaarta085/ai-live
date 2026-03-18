@@ -85,6 +85,10 @@ export class GeminiLiveBridge {
 
     if (serverContent.modelTurn?.parts?.length) {
       for (const part of serverContent.modelTurn.parts) {
+        if (part.thought || part.inlineData?.mimeType?.includes('thought')) {
+          continue;
+        }
+
         if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
           this.handlers.onAudio?.({
             mimeType: part.inlineData.mimeType,
@@ -92,7 +96,7 @@ export class GeminiLiveBridge {
           });
         }
 
-        if (part.text) {
+        if (part.text?.trim()) {
           this.handlers.onText?.({ role: 'model', text: part.text });
         }
       }

@@ -55,11 +55,14 @@ function App() {
       const last = next[next.length - 1];
 
       if (last && last.role === role) {
-        next[next.length - 1] = { ...last, text };
+        next[next.length - 1] = {
+          ...last,
+          text: mergeTranscriptText(last.text, text),
+        };
         return next;
       }
 
-      next.push({ id: crypto.randomUUID(), role, text });
+      next.push({ id: crypto.randomUUID(), role, text: text.trim() });
       return next;
     });
   };
@@ -345,6 +348,26 @@ function App() {
       </section>
     </main>
   );
+}
+
+
+function mergeTranscriptText(previousText, incomingText) {
+  const previous = previousText?.trim() ?? '';
+  const incoming = incomingText?.trim() ?? '';
+
+  if (!previous) return incoming;
+  if (!incoming) return previous;
+  if (incoming === previous || previous.endsWith(incoming)) return previous;
+  if (incoming.startsWith(previous)) return incoming;
+
+  const maxOverlap = Math.min(previous.length, incoming.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (previous.slice(-size) === incoming.slice(0, size)) {
+      return `${previous}${incoming.slice(size)}`.trim();
+    }
+  }
+
+  return `${previous} ${incoming}`.replace(/\s+/g, ' ').trim();
 }
 
 function mergeFloat32(chunks) {
