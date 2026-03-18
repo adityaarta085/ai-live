@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StreamingAudioPlayer } from './audio/playback';
 import { base64FromArrayBuffer, downsampleBuffer, floatTo16BitPCM } from './audio/pcm';
+import { GeminiLiveBridge } from './lib/gemini-live-client';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws';
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_MS = 200;
 
@@ -15,7 +15,7 @@ function App() {
   const captureContextRef = useRef(null);
   const sourceNodeRef = useRef(null);
   const workletNodeRef = useRef(null);
-  const wsRef = useRef(null);
+  const geminiRef = useRef(null);
   const flushTimerRef = useRef(null);
   const pcmQueueRef = useRef([]);
   const playerRef = useRef(new StreamingAudioPlayer(24000));
@@ -50,8 +50,8 @@ function App() {
   };
 
   const flushPcm = () => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || pcmQueueRef.current.length === 0) {
+    const gemini = geminiRef.current;
+    if (!gemini || pcmQueueRef.current.length === 0) {
       return;
     }
 
@@ -59,7 +59,7 @@ function App() {
     pcmQueueRef.current = [];
     const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
     const pcm16 = floatTo16BitPCM(downsampled);
-    ws.send(JSON.stringify({ type: 'audio', data: base64FromArrayBuffer(pcm16) }));
+    gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
   };
 
   const startCapture = async () => {
@@ -106,8 +106,8 @@ function App() {
     }
 
     flushPcm();
-    wsRef.current?.close();
-    wsRef.current = null;
+    geminiRef.current?.close();
+    geminiRef.current = null;
     playerRef.current.clear();
 
     workletNodeRef.current?.disconnect();
@@ -127,75 +127,51 @@ function App() {
     setConversationState('disconnected');
   };
 
-  const connectSocket = async () => {
+  const connectGemini = async () => {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('VITE_GEMINI_API_KEY is not configured in environment variables.');
+    }
+
     setError('');
     setConnectionState('connecting');
     setConversationState('disconnected');
 
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConversationState('connecting');
-      };
-
-      ws.onmessage = async (event) => {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'ready') {
-          setConnectionState('streaming');
-          setConversationState('listening');
-          resolve();
+    const gemini = new GeminiLiveBridge({
+      apiKey,
+      onAudio: async (payload) => {
+        setConversationState('speaking');
+        await playerRef.current.enqueueBase64(payload.data);
+      },
+      onText: (payload) => {
+        appendTranscript(payload.role, payload.text);
+      },
+      onInterrupted: () => {
+        playerRef.current.clear();
+        setConversationState('listening');
+      },
+      onTurnComplete: (payload) => {
+        setConversationState('listening');
+        if (payload.closed && !manualStopRef.current) {
+           stopSession();
         }
-
-        if (message.type === 'audio') {
-          setConversationState('speaking');
-          await playerRef.current.enqueueBase64(message.data);
-        }
-
-        if (message.type === 'transcript') {
-          appendTranscript(message.role, message.text);
-        }
-
-        if (message.type === 'interrupted') {
-          playerRef.current.clear();
-          setConversationState('listening');
-        }
-
-        if (message.type === 'turn_complete') {
-          setConversationState('listening');
-        }
-
-        if (message.type === 'error') {
-          setError(message.message);
-          reject(new Error(message.message));
-        }
-      };
-
-      ws.onerror = () => {
-        const message = 'WebSocket connection failed.';
-        setError(message);
-        reject(new Error(message));
-      };
-
-      ws.onclose = () => {
-        setConnectionState('idle');
-        setConversationState('disconnected');
-
-        if (!manualStopRef.current) {
-          reconnectTimerRef.current = window.setTimeout(() => {
-            startSession(true);
-          }, 1000);
-        }
-      };
+      },
+      onError: (error) => {
+        setError(error.message || 'Gemini Live session error.');
+        stopSession();
+      },
     });
+
+    geminiRef.current = gemini;
+    await gemini.connect();
+    setConnectionState('streaming');
+    setConversationState('listening');
   };
 
   const startSession = async (isReconnect = false) => {
     manualStopRef.current = false;
     try {
-      await connectSocket();
+      await connectGemini();
       await startCapture();
       if (isReconnect) {
         setError('');
@@ -212,7 +188,7 @@ function App() {
         <p className="eyebrow">Gemini 2.5 Flash Native Audio Dialog</p>
         <h1>Realtime Voice Console</h1>
         <p className="lede">
-          Browser microphone PCM is streamed to your Node.js WebSocket backend, proxied to Gemini Live,
+          Browser microphone PCM is streamed directly to Gemini Live API,
           and played back as low-latency audio in the browser.
         </p>
 
