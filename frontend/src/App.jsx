@@ -5,6 +5,7 @@ import { GeminiLiveBridge } from './lib/gemini-live-client';
 
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_MS = 200;
+const CONNECT_TIMEOUT_MS = 15000;
 
 function App() {
   const [connectionState, setConnectionState] = useState('idle');
@@ -190,7 +191,16 @@ function App() {
     });
 
     geminiRef.current = gemini;
-    await gemini.connect();
+
+    await Promise.race([
+      gemini.connect(),
+      new Promise((_, reject) => {
+        window.setTimeout(() => {
+          reject(new Error('Koneksi ke Gemini Live timeout. Periksa model, API key, atau koneksi internet Anda.'));
+        }, CONNECT_TIMEOUT_MS);
+      }),
+    ]);
+
     setConnectionState('streaming');
     setConversationState('listening');
   };
@@ -227,11 +237,11 @@ function App() {
   return (
     <main className="app-shell">
       <section className="card">
-        <p className="eyebrow">Gemini 2.0 Flash Audio Dialog</p>
+        <p className="eyebrow">Gemini 2.5 Flash Native Audio</p>
         <h1>Realtime Voice Console</h1>
         <p className="lede">
-          Mikrofon browser dialirkan langsung ke Gemini Live API,
-          dan diputar kembali sebagai audio latensi rendah di browser.
+          Mikrofon browser dialirkan langsung ke Gemini Live API native audio,
+          dengan respons suara Bahasa Indonesia berlatensi rendah di browser.
         </p>
 
         <div className="status-row">
@@ -246,6 +256,10 @@ function App() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
+
+        {connectionState === 'connecting' ? (
+          <div className="error-banner">Sedang membuka koneksi ke Gemini Live. Jika terlalu lama, sesi akan dibatalkan otomatis.</div>
+        ) : null}
 
         <div className="transcript-panel">
           <div className="panel-header">

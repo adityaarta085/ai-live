@@ -1,11 +1,17 @@
 import { GoogleGenAI } from '@google/genai';
 
-const DEFAULT_MODEL = 'gemini-2.0-flash-exp';
-const DEFAULT_VOICE = 'Aoede';
+const DEFAULT_MODEL =
+  import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+const DEFAULT_VOICE = import.meta.env.VITE_GEMINI_VOICE || 'Aoede';
 
 export class GeminiLiveBridge {
   constructor({ apiKey, onAudio, onText, onInterrupted, onTurnComplete, onError }) {
-    this.ai = new GoogleGenAI({ apiKey });
+    this.ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        apiVersion: 'v1alpha',
+      },
+    });
     this.session = null;
     this.handlers = { onAudio, onText, onInterrupted, onTurnComplete, onError };
   }
@@ -15,9 +21,12 @@ export class GeminiLiveBridge {
       model: DEFAULT_MODEL,
       config: {
         systemInstruction: {
-            parts: [{
-                text: "Anda adalah asisten AI yang ramah dan membantu. Tolong bicara dan merespons dalam Bahasa Indonesia yang alami dan sopan. Gunakan nada bicara yang hangat."
-            }]
+          parts: [
+            {
+              text:
+                'Anda adalah asisten AI yang ramah dan membantu. Selalu dengarkan dan jawab dalam Bahasa Indonesia yang alami, jelas, dan sopan. Jika pengguna bercampur bahasa, tetap utamakan Bahasa Indonesia kecuali diminta lain.',
+            },
+          ],
         },
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -27,10 +36,9 @@ export class GeminiLiveBridge {
             },
           },
         },
-        inputAudioTranscription: {
-            languageCode: "id-ID"
-        },
+        inputAudioTranscription: {},
         outputAudioTranscription: {},
+        enableAffectiveDialog: true,
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
