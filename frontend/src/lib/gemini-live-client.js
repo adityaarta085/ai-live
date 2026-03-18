@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 
-const DEFAULT_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const DEFAULT_MODEL = 'gemini-2.0-flash-exp';
 const DEFAULT_VOICE = 'Aoede';
 
 export class GeminiLiveBridge {
@@ -14,6 +14,11 @@ export class GeminiLiveBridge {
     this.session = await this.ai.live.connect({
       model: DEFAULT_MODEL,
       config: {
+        systemInstruction: {
+            parts: [{
+                text: "Anda adalah asisten AI yang ramah dan membantu. Tolong bicara dan merespons dalam Bahasa Indonesia yang alami dan sopan. Gunakan nada bicara yang hangat."
+            }]
+        },
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
@@ -22,7 +27,9 @@ export class GeminiLiveBridge {
             },
           },
         },
-        inputAudioTranscription: {},
+        inputAudioTranscription: {
+            languageCode: "id-ID"
+        },
         outputAudioTranscription: {},
         realtimeInputConfig: {
           automaticActivityDetection: {

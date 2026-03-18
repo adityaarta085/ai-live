@@ -24,10 +24,10 @@ function App() {
 
   const statusLabel = useMemo(() => {
     if (error) return 'Error';
-    if (conversationState === 'speaking') return 'Speaking';
-    if (connectionState === 'streaming') return 'Listening';
-    if (connectionState === 'connecting') return 'Connecting';
-    return 'Disconnected';
+    if (conversationState === 'speaking') return 'Berbicara';
+    if (connectionState === 'streaming') return 'Mendengarkan';
+    if (connectionState === 'connecting') return 'Menghubungkan';
+    return 'Terputus';
   }, [connectionState, conversationState, error]);
 
   useEffect(() => () => stopSession(), []);
@@ -157,7 +157,7 @@ function App() {
         }
       },
       onError: (error) => {
-        setError(error.message || 'Gemini Live session error.');
+        setError(error.message || 'Kesalahan sesi Gemini Live.');
         stopSession();
       },
     });
@@ -185,17 +185,17 @@ function App() {
   return (
     <main className="app-shell">
       <section className="card">
-        <p className="eyebrow">Gemini 2.5 Flash Native Audio Dialog</p>
+        <p className="eyebrow">Gemini 2.0 Flash Audio Dialog</p>
         <h1>Realtime Voice Console</h1>
         <p className="lede">
-          Browser microphone PCM is streamed directly to Gemini Live API,
-          and played back as low-latency audio in the browser.
+          Mikrofon browser dialirkan langsung ke Gemini Live API,
+          dan diputar kembali sebagai audio latensi rendah di browser.
         </p>
 
         <div className="status-row">
-          <span className={`status-pill ${statusLabel.toLowerCase()}`}>{statusLabel}</span>
+          <span className={`status-pill ${statusLabel === 'Berbicara' ? 'speaking' : statusLabel === 'Mendengarkan' ? 'streaming' : statusLabel === 'Menghubungkan' ? 'connecting' : 'idle'}`}>{statusLabel}</span>
           <button className="primary-button" onClick={connectionState === 'streaming' ? stopSession : startSession}>
-            {connectionState === 'streaming' ? 'Stop session' : 'Start session'}
+            {connectionState === 'streaming' ? 'Berhenti' : 'Mulai Sesi'}
           </button>
         </div>
 
@@ -203,16 +203,16 @@ function App() {
 
         <div className="transcript-panel">
           <div className="panel-header">
-            <h2>Live transcript</h2>
-            <span>{transcripts.length} messages</span>
+            <h2>Transkrip Langsung</h2>
+            <span>{transcripts.length} pesan</span>
           </div>
           <div className="transcript-list">
             {transcripts.length === 0 ? (
-              <p className="placeholder">Start a session and speak to see user + model transcripts.</p>
+              <p className="placeholder">Mulai sesi dan bicaralah untuk melihat transkrip.</p>
             ) : (
               transcripts.map((item) => (
                 <article key={item.id} className={`transcript-item ${item.role}`}>
-                  <strong>{item.role === 'user' ? 'You' : 'Gemini'}</strong>
+                  <strong>{item.role === 'user' ? 'Anda' : 'Gemini'}</strong>
                   <p>{item.text}</p>
                 </article>
               ))
