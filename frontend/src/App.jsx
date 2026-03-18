@@ -19,7 +19,6 @@ function App() {
   const flushTimerRef = useRef(null);
   const pcmQueueRef = useRef([]);
   const playerRef = useRef(new StreamingAudioPlayer(24000));
-  const reconnectTimerRef = useRef(null);
   const manualStopRef = useRef(false);
 
   const statusLabel = useMemo(() => {
@@ -57,48 +56,57 @@ function App() {
 
     const merged = mergeFloat32(pcmQueueRef.current);
     pcmQueueRef.current = [];
-    const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
-    const pcm16 = floatTo16BitPCM(downsampled);
-    gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
+    if (captureContextRef.current) {
+        const downsampled = downsampleBuffer(merged, captureContextRef.current.sampleRate, TARGET_SAMPLE_RATE);
+        const pcm16 = floatTo16BitPCM(downsampled);
+        gemini.sendAudioChunk(base64FromArrayBuffer(pcm16));
+    }
   };
 
   const startCapture = async () => {
-    mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        noiseSuppression: true,
-        echoCancellation: true,
-        autoGainControl: true,
-      },
-    });
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            noiseSuppression: true,
+            echoCancellation: true,
+            autoGainControl: true,
+          },
+        });
+        mediaStreamRef.current = stream;
 
-    const captureContext = new AudioContext();
-    captureContextRef.current = captureContext;
-    await captureContext.audioWorklet.addModule('/pcm-recorder-worklet.js');
+        if (!(stream instanceof MediaStream)) {
+            throw new Error('Gagal mendapatkan stream audio mikrofon.');
+        }
 
-    const sourceNode = captureContext.createMediaStreamSource(mediaStreamRef.current);
-    sourceNodeRef.current = sourceNode;
+        const captureContext = new AudioContext();
+        captureContextRef.current = captureContext;
+        await captureContext.audioWorklet.addModule('/pcm-recorder-worklet.js');
 
-    const workletNode = new AudioWorkletNode(captureContext, 'pcm-recorder-processor');
-    const silentGain = captureContext.createGain();
-    silentGain.gain.value = 0;
-    workletNode.port.onmessage = (event) => {
-      pcmQueueRef.current.push(new Float32Array(event.data));
-    };
+        const sourceNode = captureContext.createMediaStreamSource(stream);
+        sourceNodeRef.current = sourceNode;
 
-    sourceNode.connect(workletNode);
-    workletNode.connect(silentGain).connect(captureContext.destination);
-    workletNodeRef.current = workletNode;
-    flushTimerRef.current = window.setInterval(flushPcm, CHUNK_MS);
+        const workletNode = new AudioWorkletNode(captureContext, 'pcm-recorder-processor');
+        const silentGain = captureContext.createGain();
+        silentGain.gain.value = 0;
+        workletNode.port.onmessage = (event) => {
+          pcmQueueRef.current.push(new Float32Array(event.data));
+        };
+
+        sourceNode.connect(workletNode);
+        workletNode.connect(silentGain).connect(captureContext.destination);
+        workletNodeRef.current = workletNode;
+
+        if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+        flushTimerRef.current = window.setInterval(flushPcm, CHUNK_MS);
+    } catch (err) {
+        console.error('startCapture failed:', err);
+        throw new Error('Gagal mengakses mikrofon: ' + err.message);
+    }
   };
 
   const stopSession = async () => {
     manualStopRef.current = true;
-
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
 
     if (flushTimerRef.current) {
       window.clearInterval(flushTimerRef.current);
@@ -116,12 +124,17 @@ function App() {
     sourceNodeRef.current = null;
 
     if (captureContextRef.current) {
-      await captureContextRef.current.close();
+      if (captureContextRef.current.state !== 'closed') {
+        await captureContextRef.current.close();
+      }
       captureContextRef.current = null;
     }
 
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
+    if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+    }
+
     pcmQueueRef.current = [];
     setConnectionState('idle');
     setConversationState('disconnected');
@@ -130,7 +143,7 @@ function App() {
   const connectGemini = async () => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('VITE_GEMINI_API_KEY is not configured in environment variables.');
+      throw new Error('VITE_GEMINI_API_KEY belum dikonfigurasi.');
     }
 
     setError('');
@@ -168,19 +181,28 @@ function App() {
     setConversationState('listening');
   };
 
-  const startSession = async (isReconnect = false) => {
+  const startSession = async () => {
+    if (connectionState !== 'idle' && connectionState !== 'error') return;
+
     manualStopRef.current = false;
     try {
       await connectGemini();
       await startCapture();
-      if (isReconnect) {
-        setError('');
-      }
     } catch (sessionError) {
       setError(sessionError.message);
       await stopSession();
     }
   };
+
+  const handleAction = () => {
+      if (connectionState === 'streaming') {
+          stopSession();
+      } else if (connectionState === 'idle' || error) {
+          startSession();
+      }
+  };
+
+  const isPending = connectionState === 'connecting';
 
   return (
     <main className="app-shell">
@@ -194,7 +216,11 @@ function App() {
 
         <div className="status-row">
           <span className={`status-pill ${statusLabel === 'Berbicara' ? 'speaking' : statusLabel === 'Mendengarkan' ? 'streaming' : statusLabel === 'Menghubungkan' ? 'connecting' : 'idle'}`}>{statusLabel}</span>
-          <button className="primary-button" onClick={connectionState === 'streaming' ? stopSession : startSession}>
+          <button
+            className="primary-button"
+            onClick={handleAction}
+            disabled={isPending}
+          >
             {connectionState === 'streaming' ? 'Berhenti' : 'Mulai Sesi'}
           </button>
         </div>
